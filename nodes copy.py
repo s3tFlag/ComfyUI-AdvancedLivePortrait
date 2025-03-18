@@ -217,17 +217,13 @@ class LP_Engine:
 
         return self.detect_model
 
-    def get_face_bboxes(self, image_rgb,face_index = 0):
+    def get_face_bboxes(self, image_rgb):
         detect_model = self.get_detect_model()
         pred = detect_model(image_rgb, conf=0.7, device="")
-        print(f"len:{len(pred[0].boxes)}")
-        if len(pred[0].boxes) > face_index:
-            return pred[0].boxes[face_index].xyxy.cpu().numpy(),pred[0].to_json()
-        else:
-            return pred[0].boxes[0].xyxy.cpu().numpy(),pred[0].to_json()
+        return pred[0].boxes.xyxy.cpu().numpy()
 
-    def detect_face(self, image_rgb, crop_factor, face_index = 0, sort = True):
-        bboxes,yolo_json = self.get_face_bboxes(image_rgb,face_index)
+    def detect_face(self, image_rgb, crop_factor, sort = True):
+        bboxes = self.get_face_bboxes(image_rgb)
         w, h = get_rgb_size(image_rgb)
 
         print(f"w, h:{w, h}")
@@ -269,7 +265,7 @@ class LP_Engine:
         new_y2 = int(kernel_y + crop_h / 2)
 
         if not sort:
-            return [int(new_x1), int(new_y1), int(new_x2), int(new_y2)],yolo_json
+            return [int(new_x1), int(new_y1), int(new_x2), int(new_y2)]
 
         if new_x1 < 0:
             new_x2 -= new_x1
@@ -298,7 +294,7 @@ class LP_Engine:
             new_x2 -= over_min
             new_y2 -= over_min
 
-        return [int(new_x1), int(new_y1), int(new_x2), int(new_y2)],yolo_json
+        return [int(new_x1), int(new_y1), int(new_x2), int(new_y2)]
 
 
     def calc_face_region(self, square, dsize):
@@ -361,7 +357,7 @@ class LP_Engine:
         if is_changed: face_img = self.expand_img(face_img, crop_region)
         return face_img
 
-    def prepare_source(self, source_image, crop_factor, is_video = False, tracking = False, face_index = 0):
+    def prepare_source(self, source_image, crop_factor, is_video = False, tracking = False):
         print("Prepare source...")
         engine = self.get_pipeline()
         source_image_np = (source_image * 255).byte().numpy()
@@ -370,7 +366,7 @@ class LP_Engine:
         psi_list = []
         for img_rgb in source_image_np:
             if tracking or len(psi_list) == 0:
-                crop_region,yolo_json = self.detect_face(img_rgb, crop_factor, face_index)
+                crop_region = self.detect_face(img_rgb, crop_factor)
                 face_region, is_changed = self.calc_face_region(crop_region, get_rgb_size(img_rgb))
 
                 s_x = (face_region[2] - face_region[0]) / 512.
@@ -391,10 +387,10 @@ class LP_Engine:
             x_s_user = engine.transform_keypoint(x_s_info)
             psi = PreparedSrcImg(img_rgb, crop_trans_m, x_s_info, f_s_user, x_s_user, mask_ori)
             if is_video == False:
-                return psi,yolo_json
+                return psi
             psi_list.append(psi)
 
-        return psi_list,yolo_json
+        return psi_list
 
     def prepare_driving_video(self, face_images):
         print("Prepare driving video...")
@@ -644,6 +640,7 @@ class PrintExpData:
         sorted_list = sorted(cuted_list, reverse=True, key=lambda item: item[0])
         print(f"sorted_list: {[[item[2], round(float(item[1]),1)] for item in sorted_list]}")
         return (exp,)
+
 class Command:
     def __init__(self, es, change, keep):
         self.es:ExpressionSet = es
@@ -742,9 +739,9 @@ class AdvancedLivePortrait:
                 self.crop_factor = crop_factor
                 self.src_images = src_images
                 if 1 < src_length:
-                    self.psi_list,_ = g_engine.prepare_source(src_images, crop_factor, True, tracking_src_vid)
+                    self.psi_list = g_engine.prepare_source(src_images, crop_factor, True, tracking_src_vid)
                 else:
-                    self.psi_list,_ = [g_engine.prepare_source(src_images, crop_factor)]
+                    self.psi_list = [g_engine.prepare_source(src_images, crop_factor)]
 
 
         cmd_list, cmd_length = self.parsing_command(command, motion_link)
@@ -838,7 +835,6 @@ class ExpressionEditor:
         self.sample_image = None
         self.src_image = None
         self.crop_factor = None
-        self.face_index = 0 
 
     @classmethod
     def INPUT_TYPES(s):
@@ -847,7 +843,6 @@ class ExpressionEditor:
         return {
             "required": {
 
-                "face_index": ("INT", {"default": 0, "min": 0, "max": 20, "step": 1, "display": display}),
                 "rotate_pitch": ("FLOAT", {"default": 0, "min": -20, "max": 20, "step": 0.5, "display": display}),
                 "rotate_yaw": ("FLOAT", {"default": 0, "min": -20, "max": 20, "step": 0.5, "display": display}),
                 "rotate_roll": ("FLOAT", {"default": 0, "min": -20, "max": 20, "step": 0.5, "display": display}),
@@ -874,8 +869,8 @@ class ExpressionEditor:
             },
         }
 
-    RETURN_TYPES = ("IMAGE", "EDITOR_LINK", "EXP_DATA","STRING")
-    RETURN_NAMES = ("image", "motion_link", "save_exp","yolo_JSON")
+    RETURN_TYPES = ("IMAGE", "EDITOR_LINK", "EXP_DATA")
+    RETURN_NAMES = ("image", "motion_link", "save_exp")
 
     FUNCTION = "run"
 
@@ -887,21 +882,19 @@ class ExpressionEditor:
     # OUTPUT_IS_LIST = (False,)
 
     def run(self, rotate_pitch, rotate_yaw, rotate_roll, blink, eyebrow, wink, pupil_x, pupil_y, aaa, eee, woo, smile,
-            src_ratio, sample_ratio, sample_parts, crop_factor, face_index,src_image=None, sample_image=None, motion_link=None, add_exp=None):
+            src_ratio, sample_ratio, sample_parts, crop_factor, src_image=None, sample_image=None, motion_link=None, add_exp=None):
         rotate_yaw = -rotate_yaw
 
         new_editor_link = None
-        yolo_json = None
         if motion_link != None:
             self.psi = motion_link[0]
             new_editor_link = motion_link.copy()
         elif src_image != None:
-            if id(src_image) != id(self.src_image) or self.crop_factor != crop_factor or face_index != self.face_index:
+            if id(src_image) != id(self.src_image) or self.crop_factor != crop_factor:
                 self.crop_factor = crop_factor
-                self.face_index = face_index
-                self.psi,yolo_json = g_engine.prepare_source(src_image, crop_factor,face_index=face_index)
+                self.psi = g_engine.prepare_source(src_image, crop_factor)
                 self.src_image = src_image
-            new_editor_link = []    
+            new_editor_link = []
             new_editor_link.append(self.psi)
         else:
             return (None,None)
@@ -967,11 +960,10 @@ class ExpressionEditor:
         results.append({"filename": filename, "type": "temp"})
 
         new_editor_link.append(es)
-        print("json",yolo_json)
-        return {"ui": {"images": results, "text": yolo_json}, "result": (out_img, new_editor_link, es, yolo_json)}
+
+        return {"ui": {"images": results}, "result": (out_img, new_editor_link, es)}
 
 NODE_CLASS_MAPPINGS = {
-    # "FaceSelect": FaceSelect,
     "AdvancedLivePortrait": AdvancedLivePortrait,
     "ExpressionEditor": ExpressionEditor,
     "LoadExpData": LoadExpData,
@@ -984,6 +976,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "AdvancedLivePortrait": "Advanced Live Portrait (PHM)",
     "ExpressionEditor": "Expression Editor (PHM)",
     "LoadExpData": "Load Exp Data (PHM)",
-    "SaveExpData": "Save Exp Data (PHM)",
-    "FaceSelect": "Face Select (PHM)"
+    "SaveExpData": "Save Exp Data (PHM)"
 }
