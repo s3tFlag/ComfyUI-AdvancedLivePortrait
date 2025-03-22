@@ -839,6 +839,7 @@ class ExpressionEditor:
         self.src_image = None
         self.crop_factor = None
         self.face_index = 0 
+        self.yolo_json = None 
 
     @classmethod
     def INPUT_TYPES(s):
@@ -891,7 +892,6 @@ class ExpressionEditor:
         rotate_yaw = -rotate_yaw
 
         new_editor_link = None
-        yolo_json = None
         if motion_link != None:
             self.psi = motion_link[0]
             new_editor_link = motion_link.copy()
@@ -899,8 +899,9 @@ class ExpressionEditor:
             if id(src_image) != id(self.src_image) or self.crop_factor != crop_factor or face_index != self.face_index:
                 self.crop_factor = crop_factor
                 self.face_index = face_index
-                self.psi,yolo_json = g_engine.prepare_source(src_image, crop_factor,face_index=face_index)
+                self.psi,self.yolo_json = g_engine.prepare_source(src_image, crop_factor,face_index=face_index)
                 self.src_image = src_image
+
             new_editor_link = []    
             new_editor_link.append(self.psi)
         else:
@@ -967,8 +968,8 @@ class ExpressionEditor:
         results.append({"filename": filename, "type": "temp"})
 
         new_editor_link.append(es)
-        print("json",yolo_json)
-        return {"ui": {"images": results, "text": yolo_json}, "result": (out_img, new_editor_link, es, yolo_json)}
+        print("json",self.yolo_json)
+        return {"ui": {"images": results, "text": self.yolo_json}, "result": (out_img, new_editor_link, es, self.yolo_json)}
 
 NODE_CLASS_MAPPINGS = {
     # "FaceSelect": FaceSelect,
